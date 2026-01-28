@@ -163,16 +163,11 @@ program veiled_markets.aleo {
     // ========================================================================
     // Using async transitions for on-chain state mutations.
     // Each async transition returns a Future that executes on-chain.
-
+    
     // ------------------------------------------------------------------------
-    // CONSTRUCTOR (Required since Leo v3.1.0)
-    // Locks program to prevent future upgrades
     // ------------------------------------------------------------------------
-    @noupgrade
-    async constructor() {
-        // Leo compiler auto-generates upgrade prevention logic
-    }
-
+    
+    
     // ------------------------------------------------------------------------
     // CREATE MARKET
     // Creates a new prediction market with specified parameters
