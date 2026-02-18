@@ -1,243 +1,349 @@
-# 🎯 Veiled Markets
+# Veiled Markets
 
 <div align="center">
 
 <img src="./logo-veiled-markets.png" alt="Veiled Markets Logo" width="200"/>
 
-### **Predict Freely. Bet Privately.**
+### **Predict Freely. Trade Privately.**
 
-Privacy-preserving prediction market built on Aleo blockchain
+Privacy-preserving prediction market with FPMM AMM on Aleo blockchain
 
 [![Live Demo](https://img.shields.io/badge/Live-Demo-00D4AA?style=for-the-badge)](https://veiled-markets.vercel.app)
-[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_market_v3.aleo)
+[![Aleo](https://img.shields.io/badge/Aleo-Testnet-00D4AA?style=for-the-badge)](https://testnet.explorer.provable.com/program/veiled_markets_v14.aleo)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](./LICENSE)
 
 </div>
 
 ---
 
-## 🌟 What is Veiled Markets?
+## What is Veiled Markets?
 
-A prediction market platform where you can bet on future events with complete privacy. Built on Aleo's zero-knowledge blockchain:
+A prediction market protocol where users trade outcome shares with complete privacy. Built on Aleo's zero-knowledge blockchain with a Gnosis-style Fixed Product Market Maker (FPMM).
 
-- 🔒 **Private Bets** — Your position and amount stay encrypted
-- 📊 **Fair Odds** — Parimutuel pool system (no AMM needed)
-- ✅ **Verifiable** — All markets proven on-chain
-- 🔗 **Real Data** — Live from Aleo testnet
+- **Private Trading** — Buy shares via `transfer_private_to_public` (address and amount encrypted on-chain)
+- **FPMM AMM** — Complete-set minting/burning with constant product invariant
+- **Multi-Outcome** — Support for 2, 3, or 4 outcome markets
+- **Dual Token** — Markets in ALEO or USDCX stablecoin
+- **LP Provision** — Add/remove liquidity, earn 1% LP fees per trade
+- **Dispute Resolution** — On-chain dispute mechanism with bond staking
 
-## 🏗️ Architecture
+## Contract Details
+
+| Field | Value |
+|---|---|
+| **Program** | `veiled_markets_v14.aleo` |
+| **Network** | Aleo Testnet |
+| **Deploy TX** | `at186k9d264w2s9qfd994aam2xpyda828hnsyh0aan5g25p32v5cuqqgqstv5` |
+| **Transitions** | 30 |
+| **Statements** | 1,974 |
+| **Dependencies** | `credits.aleo`, `test_usdcx_stablecoin.aleo` |
+
+## Architecture
 
 ```
-Frontend (React + TypeScript)
-    ↓
-Aleo Wallet (Puzzle/Leo)
-    ↓
-Smart Contract (veiled_market_v3.aleo)
-    ↓
+Frontend (React + Vite + TypeScript)
+    |
+Shield Wallet (ProvableHQ Adapter)
+    |
+Smart Contract (veiled_markets_v14.aleo)
+    |
 Aleo Blockchain (Testnet)
 ```
 
-### Key Components
-
-- **Smart Contract** (`contracts/src/main.leo`) - Parimutuel betting logic with 2% fees
-- **Frontend** (`frontend/src/`) - React app with wallet integration
-- **Indexer** (`backend/src/`) - Scans blockchain for markets
-- **SDK** (`sdk/src/`) - TypeScript client library
-
-## 🚀 Quick Start
-
-```bash
-# Clone and install
-git clone https://github.com/mdlog/veiled-markets.git
-cd veiled-markets
-pnpm install
-
-# Setup environment
-cp frontend/.env.example frontend/.env
-
-# Start development
-pnpm dev
-# Open http://localhost:5173
-```
-
-**Live App:** [veiled-markets.vercel.app](https://veiled-markets.vercel.app)
-
-**Contract:** `veiled_market_v3.aleo` on [Aleo Testnet](https://testnet.explorer.provable.com/program/veiled_market_v3.aleo)
-
-## 📁 Project Structure
+### Monorepo Structure
 
 ```
 veiled-markets/
-├── frontend/          # React app
+├── contracts/             # Leo smart contract
+│   └── src/main.leo       # FPMM AMM, LP, dispute, multi-token (2500+ lines)
+├── frontend/              # React dashboard
 │   ├── src/
-│   │   ├── components/    # UI components
-│   │   ├── lib/           # Utils & SDK
-│   │   ├── pages/         # Routes
-│   │   └── styles/        # CSS
-│   └── public/            # Static files
-├── contracts/         # Leo smart contracts
-│   └── src/main.leo   # Core logic
-├── backend/           # Blockchain indexer
-├── sdk/              # TypeScript SDK
-└── docs/             # Documentation
+│   │   ├── components/    # Trading modals, market cards, wallet bridge
+│   │   ├── hooks/         # useAleoTransaction (wallet-agnostic)
+│   │   ├── lib/           # AMM math, aleo-client, store, config
+│   │   ├── pages/         # Dashboard, MarketDetail, Landing
+│   │   └── styles/        # Tailwind + custom CSS
+│   └── public/            # markets-index.json, static assets
+├── backend/               # Blockchain indexer
+├── sdk/                   # TypeScript SDK
+└── docs/                  # Architecture documentation
 ```
 
-## 🎯 Features
+## FPMM Trading Model
 
-### Privacy Model
+Veiled Markets uses a **Fixed Product Market Maker** (FPMM), the same model used by Gnosis and Polymarket.
+
+### How it works
+
+**Buy (complete-set minting):** User deposits collateral, receives shares in chosen outcome. The AMM mints a complete set of shares and sells the unwanted ones back to the pool.
+
+```
+Binary: shares_out = amount * (reserve_yes + reserve_no + amount) / (reserve_other + amount)
+```
+
+**Sell (complete-set burning):** User specifies tokens to withdraw. Contract computes shares needed from the user's outcome to burn a complete set and release collateral.
+
+```
+Binary: shares_needed = tokens_desired * (r_i + r_other - td) / (r_other - td)
+```
+
+**Redeem:** Winning shares redeem 1:1 (1 share = 1 token). Losing shares = 0.
+
+### Fees (per trade)
+
+| Fee | Rate | Recipient |
+|-----|------|-----------|
+| Protocol | 0.5% | Protocol treasury |
+| Creator | 0.5% | Market creator |
+| LP | 1.0% | Liquidity providers |
+| **Total** | **2.0%** | |
+
+### Implied Price
+
+Outcome prices are derived from pool reserves:
+
+```
+price_yes = reserve_no / (reserve_yes + reserve_no)
+price_no  = reserve_yes / (reserve_yes + reserve_no)
+```
+
+## Privacy Model
 
 | Data | Visibility |
 |------|-----------|
-| Market question, total pool, odds | 🌍 Public |
-| Your bet amount & position | 🔒 Private |
-| Your identity & winnings | 🔒 Private |
+| Market question, total pool, reserves, prices | Public |
+| Your trade amount and outcome position | Private (ZK-encrypted) |
+| Your wallet address in buy transactions | Private (`transfer_private_to_public`) |
+| Market creation, resolution | Public |
 
-### Parimutuel System
+### How Privacy Works
 
-Winners split the total pool proportionally:
+ALEO buy shares use `buy_shares_private`, which calls `credits.aleo/transfer_private_to_public` internally. This means:
 
-```
-Payout = (Total Pool / Winning Pool) × (1 - 2% fees)
-```
+1. User provides a **private credits record** (not public balance)
+2. The transfer is from private to public — observer sees tokens arrive at the program address but **cannot link** them to the sender
+3. The `OutcomeShare` record is returned to the user as an encrypted record
 
-**Example:** If YES pool = 1,000 ALEO and NO pool = 500 ALEO, and YES wins:
-- Each 1 ALEO bet returns: `(1,500 / 1,000) × 0.98 = 1.47 ALEO`
-- Multiplier: **1.47x**
+USDCX markets use `buy_shares_usdcx` with `transfer_public_as_signer` (less private, but necessary for stablecoin mechanics).
 
-## 🛠️ Tech Stack
+## Key Transitions (30 total)
 
-- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS
-- **Blockchain:** Leo (Aleo), Aleo SDK
-- **State:** Zustand
-- **Wallet:** Puzzle/Leo wallet adaptors
-- **Hosting:** Vercel
+### Market Lifecycle
+| Transition | Description |
+|---|---|
+| `create_market` | Create ALEO market with initial liquidity |
+| `create_market_usdcx` | Create USDCX market with initial liquidity |
+| `close_market` | Close betting (after deadline) |
+| `resolve_market` | Resolve with winning outcome |
+| `emergency_cancel` | Cancel unresolved market (past resolution deadline) |
 
-## 💼 Wallet Setup
+### Trading
+| Transition | Description |
+|---|---|
+| `buy_shares_private` | Buy shares with private credits record (ALEO) |
+| `buy_shares_usdcx` | Buy shares with USDCX (public signer) |
+| `sell_shares` | Sell ALEO shares (tokens_desired approach) |
+| `sell_shares_usdcx` | Sell USDCX shares |
+| `redeem_shares` / `redeem_shares_usdcx` | Redeem winning shares 1:1 |
 
-**Supported:** Puzzle Wallet (recommended) | Leo Wallet
+### Liquidity
+| Transition | Description |
+|---|---|
+| `add_liquidity` / `add_liquidity_usdcx` | Provide liquidity, receive LP tokens |
+| `remove_liquidity` / `remove_liq_usdcx` | Withdraw liquidity proportionally |
+| `claim_lp_refund` / `claim_lp_refund_usdcx` | Claim LP refund on cancelled markets |
 
-1. Install wallet extension from [puzzle.online](https://puzzle.online) or [leo.app](https://leo.app)
-2. Switch to **Testnet** network
-3. Get test credits from [Aleo Faucet](https://faucet.aleo.org)
-4. Connect wallet in app
+### Dispute & Fees
+| Transition | Description |
+|---|---|
+| `dispute_resolution` | Stake bond to dispute market resolution |
+| `resolve_dispute` | Admin resolves dispute |
+| `claim_dispute_bond` / `claim_disp_bond_usdcx` | Reclaim dispute bond |
+| `withdraw_creator_fees` / `withdraw_fees_usdcx` | Creator withdraws accumulated fees |
 
-See [WALLET_TROUBLESHOOTING.md](./WALLET_TROUBLESHOOTING.md) for issues.
+## Quick Start
 
-## 🔄 Blockchain Indexer
+### Prerequisites
 
-The indexer service automatically scans the Aleo blockchain for market creation transactions, eliminating the need for hardcoded market IDs.
+- [Node.js](https://nodejs.org/) >= 18
+- [Leo](https://developer.aleo.org/getting_started/) (for contract development)
+- [Shield Wallet](https://shieldwallet.io/) browser extension
 
-### Running the Indexer
+### Setup
 
 ```bash
-# Install backend dependencies
-cd backend
+# Clone
+git clone https://github.com/mdlog/veiled-markets.git
+cd veiled-markets
+
+# Install frontend dependencies
+cd frontend
 npm install
 
-# Run indexer
-npm run index
+# Setup environment
+cp .env.example .env
+# Edit .env if needed (defaults point to testnet with v14)
 
-# Or use the helper script
-cd ..
-./scripts/index-markets.sh
-```
-
-### Output
-
-The indexer generates `backend/public/markets-index.json` and copies it to `frontend/public/markets-index.json`:
-
-```json
-{
-  "lastUpdated": "2026-01-28T15:40:51.456Z",
-  "totalMarkets": 9,
-  "marketIds": ["...", "..."],
-  "markets": [
-    {
-      "marketId": "3582024152336217571382682973364798990155453514672503623063651091171230848724field",
-      "transactionId": "at1crl3gd6ukawwrslf3r5vqttg7a8hll84fj2klqtmtwdafntspg9sgcgw2a",
-      "creator": "aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8",
-      "questionHash": "350929565016816493992297964402345071115472527106339097957348390879136520853field",
-      "category": 3,
-      "deadline": "14107320u64",
-      "resolutionDeadline": "14124600u64",
-      "createdAt": 1769614851455,
-      "blockHeight": 14067000
-    }
-  ]
-}
-```
-
-### Benefits
-
-- ✅ **No hardcoded IDs** - Markets discovered automatically
-- ✅ **Scalable** - Handles thousands of markets
-- ✅ **Production-ready** - Can be run as cron job
-- ✅ **Verifiable** - All data from blockchain
-
-See [INDEXER_GUIDE.md](./INDEXER_GUIDE.md) for detailed documentation.
-
-## 🧪 Development
-
-### Commands
-
-```bash
-pnpm dev              # Start dev server
-pnpm build            # Build for production
-pnpm test             # Run tests
-```
-
-### Create a Market
-
-```bash
-# 1. Generate question hash
-node scripts/generate-question-hash.js "Your question?"
-
-# 2. Create on blockchain
-cd contracts
-leo execute veiled_market_v3.aleo/create_market \
-  "HASH_field" \
-  "3u8" \              # category (0-6)
-  "14107320u64" \      # betting deadline
-  "14124600u64" \      # resolution deadline
-  --network testnet \
-  --broadcast
-
-# 3. Run indexer
-cd ../backend
-npm run index
+# Start development server
+npm run dev
+# Open http://localhost:5173
 ```
 
 ### Environment Variables
 
-Copy `frontend/.env.example` to `frontend/.env`:
+Key variables in `frontend/.env`:
 
 ```env
 VITE_NETWORK=testnet
-VITE_PROGRAM_ID=veiled_market_v3.aleo
+VITE_PROGRAM_ID=veiled_markets_v14.aleo
 VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
+VITE_EXPLORER_URL=https://testnet.explorer.provable.com
+VITE_USDCX_PROGRAM_ID=test_usdcx_stablecoin.aleo
 ```
 
-## 📚 Documentation
+### Build Contract
+
+```bash
+cd contracts
+leo build
+# Output: 1974 statements, 30 transitions
+```
+
+### Deploy Contract
+
+```bash
+cd contracts
+leo deploy --network testnet --yes --broadcast
+# Cost: ~60.70 ALEO for v14
+```
+
+## Create a Market (CLI)
+
+```bash
+# Get current block height
+CURRENT_BLOCK=$(curl -s "https://api.explorer.provable.com/v1/testnet/block/height/latest")
+
+# Calculate deadlines
+DEADLINE=$((CURRENT_BLOCK + 100000))    # ~5 days
+RESOLUTION=$((CURRENT_BLOCK + 200000))  # ~10 days
+
+# Create market (7 inputs for v14)
+snarkos developer execute veiled_markets_v14.aleo create_market \
+  "<question_hash>field" \
+  "3u8" \
+  "2u8" \
+  "${DEADLINE}u64" \
+  "${RESOLUTION}u64" \
+  "<resolver_address>" \
+  "10000000u128" \
+  --private-key <PRIVATE_KEY> \
+  --network 1 \
+  --endpoint "https://api.explorer.provable.com" \
+  --broadcast \
+  --priority-fee 3000000
+```
+
+Parameters:
+1. `question_hash` — BHP256 hash of the question string
+2. `category` — 1-7 (Politics, Sports, Crypto, etc.)
+3. `num_outcomes` — 2, 3, or 4
+4. `deadline` — Block height for betting cutoff
+5. `resolution_deadline` — Block height for resolution cutoff
+6. `resolver` — Address authorized to resolve the market
+7. `initial_liquidity` — In microcredits (10000000 = 10 ALEO)
+
+## Wallet Setup
+
+**Recommended:** [Shield Wallet](https://shieldwallet.io/)
+
+1. Install Shield Wallet browser extension
+2. Switch to **Testnet** network
+3. Get test credits from [Aleo Faucet](https://faucet.aleo.org)
+4. Connect wallet in the app — this registers `veiled_markets_v14.aleo`
+
+> **Note:** If you see "program not in allowed programs" error, disconnect and reconnect Shield Wallet to re-register the program.
+
+### Wallet Compatibility
+
+| Wallet | Create Market | Buy Shares | Status |
+|--------|:---:|:---:|---|
+| Shield Wallet | Yes | Yes | Primary wallet |
+| Puzzle Wallet | Untested | Untested | Server-side proving |
+| Leo Wallet | No | No | Can't resolve 4-level import chain |
+
+## Blockchain Indexer
+
+The indexer scans the Aleo blockchain for market creation transactions.
+
+```bash
+cd backend
+npm install
+npm run index
+```
+
+Outputs `markets-index.json` with all discovered market IDs, creators, and metadata.
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Contract** | Leo (Aleo), snarkVM |
+| **Frontend** | React 18, TypeScript, Vite |
+| **Styling** | Tailwind CSS, Framer Motion |
+| **State** | Zustand |
+| **Wallet** | ProvableHQ Aleo Wallet Adapter |
+| **Persistence** | Supabase (cross-device bet tracking) |
+| **Hosting** | Vercel |
+| **Build** | vite-plugin-wasm, vite-plugin-top-level-await |
+
+## Development
+
+```bash
+# Frontend dev server
+cd frontend && npm run dev
+
+# Build for production
+cd frontend && npm run build
+
+# Type check
+cd frontend && npx tsc --noEmit
+
+# Build contract
+cd contracts && leo build
+
+# SDK tests
+cd sdk && npm test
+```
+
+## Audit Fixes (v10+)
+
+| ID | Fix |
+|----|-----|
+| C-01 | `market_bettors` mapping for unique bettor tracking |
+| C-02 | `market_credits` mapping for per-market credit isolation |
+| C-03 | `resolver` field added to Market struct (separate from creator) |
+| H-01 | Removed predictable noise/delay mechanism |
+| H-02 | User nonce in commit_bet, reveal deadline enforcement |
+
+## Version History
+
+| Version | Key Changes |
+|---------|-------------|
+| **v14** | FPMM AMM, removed `buy_shares_public`, `expected_shares` pattern, `sell_shares` tokens_desired approach, `sell_shares` calls `credits.aleo/transfer_public` directly |
+| v13 | Fixed ternary underflow bug in buy_shares (Leo evaluates both branches) |
+| v12 | Initial FPMM implementation, multi-outcome markets, LP provision |
+| v11 | USDCX stablecoin integration, dual-token markets |
+| v10 | Audit fixes (C-01, C-02, C-03, H-01, H-02), dispute resolution |
+
+## Documentation
 
 - [Architecture Overview](./docs/ARCHITECTURE.md)
-- [Parimutuel System](./docs/PARIMUTUEL_SYSTEM.md)
 - [Privacy Analysis](./docs/PRIVACY_ANALYSIS.md)
-- [On-Chain Verification](./docs/ON_CHAIN_VERIFICATION.md)
-- [Copyable Market ID](./docs/COPYABLE_MARKET_ID.md)
-- [Indexer Guide](./INDEXER_GUIDE.md)
 - [Create Market Guide](./CREATE_MARKET_GUIDE.md)
+- [Indexer Guide](./INDEXER_GUIDE.md)
 - [Wallet Troubleshooting](./WALLET_TROUBLESHOOTING.md)
-- [Real Data Integration](./REAL_DATA_INTEGRATION.md)
 
-## 📚 Documentation
-
-- [CREATE_MARKET_GUIDE.md](./CREATE_MARKET_GUIDE.md) - How to create markets
-- [INDEXER_GUIDE.md](./INDEXER_GUIDE.md) - Blockchain indexer setup
-- [WALLET_TROUBLESHOOTING.md](./WALLET_TROUBLESHOOTING.md) - Wallet issues
-- [REAL_DATA_INTEGRATION.md](./REAL_DATA_INTEGRATION.md) - Data integration
-- [docs/](./docs) - Architecture & privacy analysis
-
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repo
 2. Create feature branch (`git checkout -b feature/name`)
@@ -245,7 +351,7 @@ VITE_ALEO_RPC_URL=https://api.explorer.provable.com/v1/testnet
 4. Push to branch (`git push origin feature/name`)
 5. Open Pull Request
 
-## 📜 License
+## License
 
 MIT License - see [LICENSE](./LICENSE)
 
@@ -253,9 +359,8 @@ MIT License - see [LICENSE](./LICENSE)
 
 <div align="center">
 
-**Built with 💜 on Aleo**
+**Built on Aleo**
 
-[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_market_v3.aleo) · [GitHub](https://github.com/mdlog/veiled-markets)
+[Live Demo](https://veiled-markets.vercel.app) · [Contract](https://testnet.explorer.provable.com/program/veiled_markets_v14.aleo) · [GitHub](https://github.com/mdlog/veiled-markets)
 
 </div>
-
