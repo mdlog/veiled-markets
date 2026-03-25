@@ -1,33 +1,23 @@
 // ============================================================================
-// VEILED MARKETS USAD v11 - Privacy-Preserving Prediction Market (USAD Token)
+// VEILED MARKETS USDCX - Privacy-Preserving Prediction Market (USDCX Token)
 // ============================================================================
-// Companion program to veiled_markets_v34.aleo (main contract) for USAD stablecoin markets.
+// Companion program to veiled_markets_v34.aleo (main contract) for USDCX stablecoin markets.
 // Separated due to snarkVM 31-transition limit.
 //
-// All USAD transactions use PRIVATE token paths:
-//   Inflow:  test_usad_stablecoin.aleo/transfer_private_to_public (Token record + MerkleProof)
-//   Outflow: test_usad_stablecoin.aleo/transfer_public_to_private (returns Token record)
+// All USDCX transactions use PRIVATE token paths:
+//   Inflow:  test_usdcx_stablecoin.aleo/transfer_private_to_public (Token record + MerkleProof)
+//   Outflow: test_usdcx_stablecoin.aleo/transfer_public_to_private (returns Token record)
 //
-// Resolution bonds are always in ALEO (credits.aleo) regardless of market token.
+// v4: Multi-Voter Quorum + Dispute resolution system.
+// Vote/Dispute bonds are always in ALEO (credits.aleo) regardless of market token.
 //
-// v11 changes from v10:
-// - REMOVED: submit_outcome, challenge_outcome, finalize_outcome,
-//   claim_resolver_bond, claim_resolver_reward
-// - REMOVED: ResolverBondReceipt, ResolutionRound
-// - REMOVED: resolution_rounds, resolver_rewards mappings
-// - REMOVED: MIN_RESOLUTION_BOND, MAX_RESOLUTION_ROUNDS, BOND_MULTIPLIER,
-//   RESOLVER_FEE_PERCENT, CHALLENGE_WINDOW_BLOCKS
-// - ADDED: Multi-Voter Quorum + Dispute resolution system (vote_outcome,
-//   finalize_votes, confirm_resolution, dispute_resolution,
-//   claim_voter_bond, claim_dispute_bond, claim_voter_reward)
-// - ADDED: VoterBondReceipt, DisputeBondReceipt, VoteTally, VoterKey
-// - ADDED: vote_tallies, voter_participated, voter_rewards, dispute_bonds mappings
+// 21 transitions total (well within 31 limit)
 // ============================================================================
 
 import credits.aleo;
-import test_usad_stablecoin.aleo;
+import test_usdcx_stablecoin.aleo;
 
-program veiled_markets_usad_v11.aleo {
+program veiled_markets_usdcx_v4.aleo {
 
     // ========================================================================
     // CONSTANTS
@@ -38,8 +28,8 @@ program veiled_markets_usad_v11.aleo {
     const MARKET_STATUS_RESOLVED: u8 = 3u8;
     const MARKET_STATUS_CANCELLED: u8 = 4u8;
     const STATUS_PENDING_RESOLUTION: u8 = 5u8;
-    const STATUS_PENDING_FINALIZATION: u8 = 6u8;  // v11: votes tallied, dispute window open
-    const STATUS_DISPUTED: u8 = 7u8;               // v11: dispute filed, awaiting re-vote or governance
+    const STATUS_PENDING_FINALIZATION: u8 = 6u8;  // v4: votes tallied, dispute window open
+    const STATUS_DISPUTED: u8 = 7u8;               // v4: dispute filed, awaiting re-vote or governance
 
     const OUTCOME_1: u8 = 1u8;
     const OUTCOME_2: u8 = 2u8;
@@ -47,7 +37,7 @@ program veiled_markets_usad_v11.aleo {
     const OUTCOME_4: u8 = 4u8;
 
     const TOKEN_ALEO: u8 = 1u8;
-    const TOKEN_USAD: u8 = 3u8;
+    const TOKEN_USDCX: u8 = 2u8;
 
     // Fee configuration (basis points: 100 = 1%)
     const PROTOCOL_FEE_BPS: u128 = 50u128;
@@ -55,28 +45,28 @@ program veiled_markets_usad_v11.aleo {
     const LP_FEE_BPS: u128 = 100u128;
     const FEE_DENOMINATOR: u128 = 10000u128;
 
-    // v11: Voter reward — 20% of accumulated protocol_fees split among winning voters
+    // v4: Voter reward — 20% of accumulated protocol_fees split among winning voters
     const VOTER_REWARD_PERCENT: u128 = 20u128;
 
     const MIN_TRADE_AMOUNT: u128 = 1000u128;
     const MIN_LIQUIDITY: u128 = 10000u128;
 
-    // v11: Multi-Voter Quorum + Dispute resolution system
+    // v4: Multi-Voter Quorum + Dispute resolution system
     const MIN_VOTE_BOND: u128 = 1000000u128;          // 1 ALEO per vote
     const MIN_VOTERS: u8 = 3u8;                        // Minimum 3 voters for valid resolution
     const VOTE_WINDOW_BLOCKS: u64 = 2880u64;           // 12 hours voting window
     const DISPUTE_WINDOW_BLOCKS: u64 = 2880u64;        // 12 hours dispute window after finalize
-    const DISPUTE_BOND_MULTIPLIER: u128 = 3u128;       // Dispute bond = 3x total voter bonds
+    const DISPUTE_BOND_MULTIPLIER: u128 = 3u128;       // Dispute bond = 3× total voter bonds
 
     const MULTISIG_CONFIG_KEY: u8 = 0u8;
     const ACTION_WITHDRAW: u8 = 1u8;
     const DEPLOYER: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
 
-    // v11: Governance program address for cross-program authorization
+    // v4: Governance program address for cross-program authorization
     const GOVERNANCE_PROGRAM: address = aleo10tm5ektsr5v7kdc5phs8pha42vrkhe2rlxfl2v979wunhzx07vpqnqplv8;
 
-    // Treasury key for USAD
-    const CREDIT_KEY_USAD: u8 = 2u8;
+    // Treasury key for USDCX
+    const CREDIT_KEY_USDCX: u8 = 1u8;
     // Treasury key for ALEO (dispute bonds)
     const CREDIT_KEY_ALEO: u8 = 0u8;
 
@@ -101,7 +91,7 @@ program veiled_markets_usad_v11.aleo {
         token_type: u8,
     }
 
-    // v11: Multi-Voter Quorum — receipt for each voter's bond
+    // v4: Multi-Voter Quorum — receipt for each voter's bond
     record VoterBondReceipt {
         owner: address,
         market_id: field,
@@ -110,7 +100,7 @@ program veiled_markets_usad_v11.aleo {
         bond_nonce: field,
     }
 
-    // v11: Dispute bond receipt
+    // v4: Dispute bond receipt
     record DisputeBondReceipt {
         owner: address,
         market_id: field,
@@ -156,7 +146,7 @@ program veiled_markets_usad_v11.aleo {
         total_volume: u128,
     }
 
-    // v11: Multi-Voter Quorum — tracks vote tallies per market
+    // v4: Multi-Voter Quorum — tracks vote tallies per market
     struct VoteTally {
         market_id: field,
         outcome_1_bonds: u128,
@@ -177,14 +167,14 @@ program veiled_markets_usad_v11.aleo {
         creator_fees: u128,
     }
 
-    // v11: Voter/Dispute bond claim key
+    // v4: Voter/Dispute bond claim key
     struct BondClaimKey {
         market_id: field,
         claimer: address,
         bond_nonce: field,
     }
 
-    // v11: Voter participation key (prevent double voting)
+    // v4: Voter participation key (prevent double voting)
     struct VoterKey {
         market_id: field,
         voter: address,
@@ -240,7 +230,7 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // MAPPINGS (17 total — mirrors main contract v34)
+    // MAPPINGS (14 total — mirrors main contract)
     // ========================================================================
 
     mapping markets: field => Market;
@@ -248,15 +238,15 @@ program veiled_markets_usad_v11.aleo {
     mapping market_fees: field => MarketFees;
     mapping share_redeemed: field => bool;
     mapping creator_fees_claimed: field => bool;
-    mapping program_credits: u8 => u128;       // 0u8=ALEO(bonds), 2u8=USAD
+    mapping program_credits: u8 => u128;       // 0u8=ALEO(bonds), 1u8=USDCX
     mapping market_credits: field => u128;
-    mapping protocol_treasury: u8 => u128;     // 2u8=USAD
+    mapping protocol_treasury: u8 => u128;     // 1u8=USDCX
     mapping multisig_config: u8 => SignerConfig;
     mapping multisig_proposals: field => MultiSigProposal;
     mapping multisig_approvals: field => bool;
     mapping lp_positions: field => bool;
 
-    // v11: Multi-Voter Quorum + Dispute resolution system
+    // v4: Multi-Voter Quorum + Dispute resolution system
     mapping vote_tallies: field => VoteTally;              // market_id => vote tally
     mapping voter_participated: field => bool;             // hash(VoterKey) => voted
     mapping bond_claimed: field => bool;                   // hash(BondClaimKey) => claimed
@@ -272,14 +262,14 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ########################################################################
-    //                      USAD MARKET OPERATIONS (PRIVATE)
+    //                      USDCX MARKET OPERATIONS (PRIVATE)
     // ########################################################################
 
     // ========================================================================
-    // 1. CREATE MARKET (USAD) — Private inflow
+    // 1. CREATE MARKET (USDCX) — Private inflow
     // ========================================================================
 
-    async transition create_market_usad(
+    async transition create_market_usdcx(
         public question_hash: field,
         public category: u8,
         public num_outcomes: u8,
@@ -311,15 +301,15 @@ program veiled_markets_usad_v11.aleo {
             market_id: market_id,
             lp_shares: initial_liquidity,
             lp_nonce: lp_nonce,
-            token_type: TOKEN_USAD,
+            token_type: TOKEN_USDCX,
         };
 
         // Public inflow (MerkleProof parser bug workaround)
-        let transfer_future: Future = test_usad_stablecoin.aleo/transfer_public_as_signer(
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
             self.address, initial_liquidity
         );
 
-        return (market_id, lp_token, create_market_usad_fin(
+        return (market_id, lp_token, create_market_usdcx_fin(
             transfer_future,
             market_id,
             self.caller,
@@ -333,7 +323,7 @@ program veiled_markets_usad_v11.aleo {
         ));
     }
 
-    async function create_market_usad_fin(
+    async function create_market_usdcx_fin(
         transfer_future: Future,
         market_id: field,
         creator: address,
@@ -350,9 +340,6 @@ program veiled_markets_usad_v11.aleo {
         let market_exists: bool = markets.contains(market_id);
         assert(!market_exists);
 
-        // v9: No resolver whitelist — anyone can submit outcome via Open Voting + Bond
-        // resolver field in Market struct is now advisory (suggested resolver), not enforced
-
         let current_height: u64 = block.height as u64;
         assert(deadline > current_height);
         assert(resolution_deadline > deadline);
@@ -368,7 +355,7 @@ program veiled_markets_usad_v11.aleo {
             resolution_deadline: resolution_deadline,
             status: MARKET_STATUS_ACTIVE,
             created_at: current_height,
-            token_type: TOKEN_USAD,
+            token_type: TOKEN_USDCX,
         };
 
         let per_outcome: u128 = initial_liquidity / (num_outcomes as u128);
@@ -394,27 +381,27 @@ program veiled_markets_usad_v11.aleo {
             creator_fees: 0u128,
         });
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
-        program_credits.set(CREDIT_KEY_USAD, current_held + initial_liquidity);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
+        program_credits.set(CREDIT_KEY_USDCX, current_held + initial_liquidity);
         market_credits.set(market_id, initial_liquidity);
     }
 
     // ========================================================================
-    // 2. BUY SHARES (USAD) — PRIVATE inflow with Token record + MerkleProof
+    // 2. BUY SHARES (USDCX) — PRIVATE inflow with Token record + MerkleProof
     // ========================================================================
     // Uses transfer_private_to_public to deposit private Token to program balance.
     // Pattern matches buy_shares_usdcx in veiled_markets_v34.aleo.
 
-    async transition buy_shares_usad(
+    async transition buy_shares_usdcx(
         private market_id: field,
         private outcome: u8,
         private amount_in: u128,
         private expected_shares: u128,
         private min_shares_out: u128,
         private share_nonce: field,
-        private token_in: test_usad_stablecoin.aleo/Token,
-        private proofs: [test_usad_stablecoin.aleo/MerkleProof; 2],
-    ) -> (OutcomeShare, test_usad_stablecoin.aleo/ComplianceRecord, test_usad_stablecoin.aleo/Token, Future) {
+        private token_in: test_usdcx_stablecoin.aleo/Token,
+        private proofs: [test_usdcx_stablecoin.aleo/MerkleProof; 2],
+    ) -> (OutcomeShare, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(outcome >= OUTCOME_1 && outcome <= OUTCOME_4);
         assert(amount_in >= MIN_TRADE_AMOUNT);
 
@@ -424,26 +411,26 @@ program veiled_markets_usad_v11.aleo {
             outcome: outcome,
             quantity: expected_shares,
             share_nonce: share_nonce,
-            token_type: TOKEN_USAD,
+            token_type: TOKEN_USDCX,
         };
 
         // Private inflow: Token record + MerkleProof → program public balance
         // Same pattern as credits.aleo/transfer_private_to_public in buy_shares_private
         let (compliance, change, transfer_future): (
-            test_usad_stablecoin.aleo/ComplianceRecord,
-            test_usad_stablecoin.aleo/Token,
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
             Future
-        ) = test_usad_stablecoin.aleo/transfer_private_to_public(
+        ) = test_usdcx_stablecoin.aleo/transfer_private_to_public(
             self.address, amount_in, token_in, proofs
         );
 
-        return (share, compliance, change, buy_shares_usad_fin(
+        return (share, compliance, change, buy_shares_usdcx_fin(
             transfer_future, market_id, outcome, amount_in,
             expected_shares, min_shares_out
         ));
     }
 
-    async function buy_shares_usad_fin(
+    async function buy_shares_usdcx_fin(
         transfer_future: Future,
         market_id: field,
         outcome: u8,
@@ -455,7 +442,7 @@ program veiled_markets_usad_v11.aleo {
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
         assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
@@ -472,8 +459,8 @@ program veiled_markets_usad_v11.aleo {
             protocol_fees: fees.protocol_fees + protocol_fee,
             creator_fees: fees.creator_fees + creator_fee,
         });
-        let current_treasury: u128 = protocol_treasury.get_or_use(CREDIT_KEY_USAD, 0u128);
-        protocol_treasury.set(CREDIT_KEY_USAD, current_treasury + protocol_fee);
+        let current_treasury: u128 = protocol_treasury.get_or_use(CREDIT_KEY_USDCX, 0u128);
+        protocol_treasury.set(CREDIT_KEY_USDCX, current_treasury + protocol_fee);
 
         // FPMM calculation (step division)
         let pool: AMMPool = amm_pools.get(market_id);
@@ -519,23 +506,23 @@ program veiled_markets_usad_v11.aleo {
             total_volume: pool.total_volume + amount_in,
         });
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
-        program_credits.set(CREDIT_KEY_USAD, current_held + amount_in);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
+        program_credits.set(CREDIT_KEY_USDCX, current_held + amount_in);
         let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
         market_credits.set(market_id, market_held + amount_in);
     }
 
     // ========================================================================
-    // 3. SELL SHARES (USAD) — Private outflow with Token record
+    // 3. SELL SHARES (USDCX) — Private outflow with Token record
     // ========================================================================
 
-    async transition sell_shares_usad(
+    async transition sell_shares_usdcx(
         private shares: OutcomeShare,
         private tokens_desired: u128,
         private max_shares_used: u128,
-    ) -> (OutcomeShare, test_usad_stablecoin.aleo/ComplianceRecord, test_usad_stablecoin.aleo/Token, Future) {
+    ) -> (OutcomeShare, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(shares.owner == self.caller);
-        assert(shares.token_type == TOKEN_USAD);
+        assert(shares.token_type == TOKEN_USDCX);
         assert(tokens_desired >= MIN_TRADE_AMOUNT);
         assert(max_shares_used > 0u128);
         assert(max_shares_used <= shares.quantity);
@@ -547,10 +534,10 @@ program veiled_markets_usad_v11.aleo {
 
         // Private outflow: returns Token record to seller
         let (compliance, token_out, transfer_future): (
-            test_usad_stablecoin.aleo/ComplianceRecord,
-            test_usad_stablecoin.aleo/Token,
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
             Future
-        ) = test_usad_stablecoin.aleo/transfer_public_to_private(self.caller, net_tokens);
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, net_tokens);
 
         let remainder: OutcomeShare = OutcomeShare {
             owner: self.caller,
@@ -558,16 +545,16 @@ program veiled_markets_usad_v11.aleo {
             outcome: shares.outcome,
             quantity: shares.quantity - max_shares_used,
             share_nonce: shares.share_nonce,
-            token_type: TOKEN_USAD,
+            token_type: TOKEN_USDCX,
         };
 
-        return (remainder, compliance, token_out, sell_shares_usad_fin(
+        return (remainder, compliance, token_out, sell_shares_usdcx_fin(
             transfer_future, shares.market_id, shares.outcome,
             tokens_desired, max_shares_used
         ));
     }
 
-    async function sell_shares_usad_fin(
+    async function sell_shares_usdcx_fin(
         transfer_future: Future,
         market_id: field,
         outcome: u8,
@@ -578,7 +565,7 @@ program veiled_markets_usad_v11.aleo {
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
         assert(outcome >= 1u8 && outcome <= market.num_outcomes);
 
         let current_height: u64 = block.height as u64;
@@ -596,8 +583,8 @@ program veiled_markets_usad_v11.aleo {
             protocol_fees: fees.protocol_fees + protocol_fee,
             creator_fees: fees.creator_fees + creator_fee,
         });
-        let current_treasury: u128 = protocol_treasury.get_or_use(CREDIT_KEY_USAD, 0u128);
-        protocol_treasury.set(CREDIT_KEY_USAD, current_treasury + protocol_fee);
+        let current_treasury: u128 = protocol_treasury.get_or_use(CREDIT_KEY_USDCX, 0u128);
+        protocol_treasury.set(CREDIT_KEY_USDCX, current_treasury + protocol_fee);
 
         // FPMM sell calculation
         let pool: AMMPool = amm_pools.get(market_id);
@@ -664,16 +651,16 @@ program veiled_markets_usad_v11.aleo {
         assert(market_held >= pool_tokens_out);
         market_credits.set(market_id, market_held - pool_tokens_out);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(current_held >= net_tokens);
-        program_credits.set(CREDIT_KEY_USAD, current_held - net_tokens);
+        program_credits.set(CREDIT_KEY_USDCX, current_held - net_tokens);
     }
 
     // ========================================================================
-    // 4. ADD LIQUIDITY (USAD) — Private inflow
+    // 4. ADD LIQUIDITY (USDCX) — Private inflow
     // ========================================================================
 
-    async transition add_liquidity_usad(
+    async transition add_liquidity_usdcx(
         private market_id: field,
         private amount: u128,
         private expected_lp_shares: u128,
@@ -686,20 +673,20 @@ program veiled_markets_usad_v11.aleo {
             market_id: market_id,
             lp_shares: expected_lp_shares,
             lp_nonce: lp_nonce,
-            token_type: TOKEN_USAD,
+            token_type: TOKEN_USDCX,
         };
 
         // Public inflow (MerkleProof parser bug workaround)
-        let transfer_future: Future = test_usad_stablecoin.aleo/transfer_public_as_signer(
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public_as_signer(
             self.address, amount
         );
 
-        return (lp_token, add_liq_usad_fin(
+        return (lp_token, add_liq_usdcx_fin(
             transfer_future, market_id, amount, expected_lp_shares
         ));
     }
 
-    async function add_liq_usad_fin(
+    async function add_liq_usdcx_fin(
         transfer_future: Future,
         market_id: field,
         amount: u128,
@@ -709,7 +696,7 @@ program veiled_markets_usad_v11.aleo {
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_ACTIVE);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
 
         let current_height: u64 = block.height as u64;
         assert(current_height <= market.deadline);
@@ -738,8 +725,8 @@ program veiled_markets_usad_v11.aleo {
             total_volume: pool.total_volume,
         });
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
-        program_credits.set(CREDIT_KEY_USAD, current_held + amount);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
+        program_credits.set(CREDIT_KEY_USDCX, current_held + amount);
         let market_held: u128 = market_credits.get_or_use(market_id, 0u128);
         market_credits.set(market_id, market_held + amount);
     }
@@ -778,8 +765,13 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ########################################################################
-    //              v11: MULTI-VOTER QUORUM + DISPUTE RESOLUTION (ALEO bonds)
+    //                      MULTI-VOTER QUORUM + DISPUTE RESOLUTION (v4)
     // ########################################################################
+    // Minimum 3 independent voters required. Each voter bonds 1 ALEO.
+    // After voting window + quorum: finalize tallies votes.
+    // Dispute window: anyone can dispute with 3× total bonds.
+    // Winners get bond back + share of loser bonds. Losers slashed.
+    // Bond is always in ALEO regardless of market token type.
 
     // ========================================================================
     // 6. VOTE OUTCOME — Anyone votes with 1 ALEO bond
@@ -888,8 +880,8 @@ program veiled_markets_usad_v11.aleo {
         });
 
         // Track bond in ALEO credits
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
-        program_credits.set(CREDIT_KEY_ALEO, current_held + MIN_VOTE_BOND);
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
+        program_credits.set(0u8, current_held + MIN_VOTE_BOND);
     }
 
     // ========================================================================
@@ -1020,7 +1012,7 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // 9. DISPUTE RESOLUTION — Challenge voter majority with 3x bond
+    // 9. DISPUTE RESOLUTION — Challenge voter majority with 3× bond
     // ========================================================================
 
     async transition dispute_resolution(
@@ -1071,7 +1063,7 @@ program veiled_markets_usad_v11.aleo {
         assert(proposed_outcome != tally.winning_outcome);
         assert(proposed_outcome >= 1u8 && proposed_outcome <= market.num_outcomes);
 
-        // Dispute bond must be >= 3x total voter bonds
+        // Dispute bond must be >= 3× total voter bonds
         let min_dispute: u128 = tally.total_bonded * DISPUTE_BOND_MULTIPLIER;
         assert(dispute_bond >= min_dispute);
 
@@ -1111,13 +1103,16 @@ program veiled_markets_usad_v11.aleo {
         });
 
         // Track dispute bond
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
-        program_credits.set(CREDIT_KEY_ALEO, current_held + dispute_bond);
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
+        program_credits.set(0u8, current_held + dispute_bond);
     }
 
     // ========================================================================
-    // 10. CANCEL MARKET
+    // 10. CANCEL MARKET (combined: creator cancel + emergency cancel)
     // ========================================================================
+    // Two paths:
+    //   A) Creator cancel: caller is creator, market ACTIVE, zero volume
+    //   B) Emergency cancel: anyone, past resolution_deadline, not resolved/cancelled
 
     async transition cancel_market(public market_id: field) -> Future {
         return cancel_market_finalize(market_id, self.caller);
@@ -1144,7 +1139,7 @@ program veiled_markets_usad_v11.aleo {
         let pool: AMMPool = amm_pools.get(market_id);
         assert(!is_creator_cancel || pool.total_volume == 0u128);
 
-        // v11: Clean up vote data. Bond holders can still claim via
+        // v4: Clean up vote data. Bond holders can still claim via
         // claim_voter_bond which accepts CANCELLED status.
         vote_tallies.remove(market_id);
 
@@ -1163,12 +1158,16 @@ program veiled_markets_usad_v11.aleo {
         });
     }
 
+    // ########################################################################
+    //                      VOTER BOND / DISPUTE BOND / VOTER REWARD (ALEO)
+    // ########################################################################
+
     // ========================================================================
-    // 11. CLAIM VOTER BOND — Winners claim bond back (v11)
+    // 11. CLAIM VOTER BOND — Winners claim bond back (v4)
     // ========================================================================
-    // If RESOLVED and voted_outcome == winning -> bond back
-    // If RESOLVED and voted_outcome != winning -> nothing (slashed)
-    // If CANCELLED -> everyone gets bond back
+    // If RESOLVED and voted_outcome == winning → bond back
+    // If RESOLVED and voted_outcome != winning → nothing (slashed)
+    // If CANCELLED → everyone gets bond back
 
     async transition claim_voter_bond(
         private receipt: VoterBondReceipt,
@@ -1218,14 +1217,13 @@ program veiled_markets_usad_v11.aleo {
         assert(!already_claimed);
         bond_claimed.set(claim_key, true);
 
-        // Deduct from program credits
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
         assert(current_held >= bond_amount);
-        program_credits.set(CREDIT_KEY_ALEO, current_held - bond_amount);
+        program_credits.set(0u8, current_held - bond_amount);
     }
 
     // ========================================================================
-    // 12. CLAIM DISPUTE BOND — Disputer claims bond after resolution (v11)
+    // 12. CLAIM DISPUTE BOND — Disputer claims bond after resolution (v4)
     // ========================================================================
 
     async transition claim_dispute_bond(
@@ -1274,24 +1272,24 @@ program veiled_markets_usad_v11.aleo {
         assert(!already_claimed);
         bond_claimed.set(claim_key, true);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
         assert(current_held >= bond_amount);
-        program_credits.set(CREDIT_KEY_ALEO, current_held - bond_amount);
+        program_credits.set(0u8, current_held - bond_amount);
     }
 
     // ########################################################################
-    //                      REDEMPTION / REFUND (USAD — private outflow)
+    //                      REDEMPTION / REFUND (USDCX — private outflow)
     // ########################################################################
 
     // ========================================================================
-    // 11. REDEEM SHARES (USAD) — Winning shares → private Token
+    // 13. REDEEM SHARES (USDCX) — Winning shares → private Token
     // ========================================================================
 
-    async transition redeem_shares_usad(
+    async transition redeem_shares_usdcx(
         private shares: OutcomeShare,
-    ) -> (test_usad_stablecoin.aleo/ComplianceRecord, test_usad_stablecoin.aleo/Token, Future) {
+    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(shares.owner == self.caller);
-        assert(shares.token_type == TOKEN_USAD);
+        assert(shares.token_type == TOKEN_USDCX);
         assert(shares.quantity > 0u128);
 
         let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
@@ -1301,18 +1299,18 @@ program veiled_markets_usad_v11.aleo {
         });
 
         let (compliance, token_out, transfer_future): (
-            test_usad_stablecoin.aleo/ComplianceRecord,
-            test_usad_stablecoin.aleo/Token,
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
             Future
-        ) = test_usad_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
 
-        return (compliance, token_out, redeem_shares_usad_fin(
+        return (compliance, token_out, redeem_shares_usdcx_fin(
             transfer_future, claim_key, shares.market_id,
             shares.outcome, shares.quantity
         ));
     }
 
-    async function redeem_shares_usad_fin(
+    async function redeem_shares_usdcx_fin(
         transfer_future: Future,
         claim_key: field,
         market_id: field,
@@ -1323,7 +1321,7 @@ program veiled_markets_usad_v11.aleo {
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_RESOLVED);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
 
         let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
@@ -1337,20 +1335,20 @@ program veiled_markets_usad_v11.aleo {
         assert(market_held >= quantity);
         market_credits.set(market_id, market_held - quantity);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(current_held >= quantity);
-        program_credits.set(CREDIT_KEY_USAD, current_held - quantity);
+        program_credits.set(CREDIT_KEY_USDCX, current_held - quantity);
     }
 
     // ========================================================================
-    // 12. CLAIM REFUND (USAD) — Cancelled markets → private Token
+    // 14. CLAIM REFUND (USDCX) — Cancelled markets → private Token
     // ========================================================================
 
-    async transition claim_refund_usad(
+    async transition claim_refund_usdcx(
         private shares: OutcomeShare,
-    ) -> (RefundClaim, test_usad_stablecoin.aleo/ComplianceRecord, test_usad_stablecoin.aleo/Token, Future) {
+    ) -> (RefundClaim, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(shares.owner == self.caller);
-        assert(shares.token_type == TOKEN_USAD);
+        assert(shares.token_type == TOKEN_USDCX);
         assert(shares.quantity > 0u128);
 
         let claim_key: field = BHP256::hash_to_field(ShareClaimKey {
@@ -1364,21 +1362,21 @@ program veiled_markets_usad_v11.aleo {
             market_id: shares.market_id,
             amount: shares.quantity,
             claim_nonce: shares.share_nonce,
-            token_type: TOKEN_USAD,
+            token_type: TOKEN_USDCX,
         };
 
         let (compliance, token_out, transfer_future): (
-            test_usad_stablecoin.aleo/ComplianceRecord,
-            test_usad_stablecoin.aleo/Token,
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
             Future
-        ) = test_usad_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, shares.quantity);
 
-        return (refund, compliance, token_out, claim_refund_usad_fin(
+        return (refund, compliance, token_out, claim_refund_usdcx_fin(
             transfer_future, claim_key, shares.market_id, shares.quantity
         ));
     }
 
-    async function claim_refund_usad_fin(
+    async function claim_refund_usdcx_fin(
         transfer_future: Future,
         claim_key: field,
         market_id: field,
@@ -1388,7 +1386,7 @@ program veiled_markets_usad_v11.aleo {
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_CANCELLED);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
 
         let already_claimed: bool = share_redeemed.get_or_use(claim_key, false);
         assert(!already_claimed);
@@ -1398,21 +1396,21 @@ program veiled_markets_usad_v11.aleo {
         assert(market_held >= amount);
         market_credits.set(market_id, market_held - amount);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(current_held >= amount);
-        program_credits.set(CREDIT_KEY_USAD, current_held - amount);
+        program_credits.set(CREDIT_KEY_USDCX, current_held - amount);
     }
 
     // ========================================================================
-    // 13. CLAIM LP REFUND (USAD) — LP on cancelled markets
+    // 15. CLAIM LP REFUND (USDCX) — LP on cancelled markets
     // ========================================================================
 
-    async transition claim_lp_refund_usad(
+    async transition claim_lp_refund_usdcx(
         private lp_token: LPToken,
         private min_tokens_out: u128,
-    ) -> (RefundClaim, test_usad_stablecoin.aleo/ComplianceRecord, test_usad_stablecoin.aleo/Token, Future) {
+    ) -> (RefundClaim, test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(lp_token.owner == self.caller);
-        assert(lp_token.token_type == TOKEN_USAD);
+        assert(lp_token.token_type == TOKEN_USDCX);
         assert(lp_token.lp_shares > 0u128);
         assert(min_tokens_out > 0u128);
 
@@ -1427,23 +1425,23 @@ program veiled_markets_usad_v11.aleo {
             market_id: lp_token.market_id,
             amount: min_tokens_out,
             claim_nonce: lp_token.lp_nonce,
-            token_type: TOKEN_USAD,
+            token_type: TOKEN_USDCX,
         };
 
         // Private outflow — returns Token record to LP provider
         let (compliance, token_out, transfer_future): (
-            test_usad_stablecoin.aleo/ComplianceRecord,
-            test_usad_stablecoin.aleo/Token,
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
             Future
-        ) = test_usad_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
 
-        return (refund, compliance, token_out, claim_lp_refund_usad_fin(
+        return (refund, compliance, token_out, claim_lp_refund_usdcx_fin(
             transfer_future, claim_key, lp_token.market_id,
             lp_token.lp_shares, min_tokens_out
         ));
     }
 
-    async function claim_lp_refund_usad_fin(
+    async function claim_lp_refund_usdcx_fin(
         transfer_future: Future,
         claim_key: field,
         market_id: field,
@@ -1454,7 +1452,7 @@ program veiled_markets_usad_v11.aleo {
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_CANCELLED);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
 
         let already_claimed: bool = lp_positions.get_or_use(claim_key, false);
         assert(!already_claimed);
@@ -1471,9 +1469,9 @@ program veiled_markets_usad_v11.aleo {
         assert(market_held >= min_tokens_out);
         market_credits.set(market_id, market_held - min_tokens_out);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(current_held >= min_tokens_out);
-        program_credits.set(CREDIT_KEY_USAD, current_held - min_tokens_out);
+        program_credits.set(CREDIT_KEY_USDCX, current_held - min_tokens_out);
 
         amm_pools.set(market_id, AMMPool {
             market_id: market_id,
@@ -1488,15 +1486,15 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // 14. WITHDRAW LP FROM RESOLVED MARKET (USAD) — private outflow
+    // 16. WITHDRAW LP FROM RESOLVED MARKET (USDCX) — private outflow
     // ========================================================================
 
-    async transition withdraw_lp_resolved_usad(
+    async transition withdraw_lp_resolved_usdcx(
         private lp_token: LPToken,
         private min_tokens_out: u128,
-    ) -> (test_usad_stablecoin.aleo/ComplianceRecord, test_usad_stablecoin.aleo/Token, Future) {
+    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         assert(lp_token.owner == self.caller);
-        assert(lp_token.token_type == TOKEN_USAD);
+        assert(lp_token.token_type == TOKEN_USDCX);
         assert(lp_token.lp_shares > 0u128);
         assert(min_tokens_out > 0u128);
 
@@ -1507,18 +1505,18 @@ program veiled_markets_usad_v11.aleo {
         });
 
         let (compliance, token_out, transfer_future): (
-            test_usad_stablecoin.aleo/ComplianceRecord,
-            test_usad_stablecoin.aleo/Token,
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
             Future
-        ) = test_usad_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, min_tokens_out);
 
-        return (compliance, token_out, withdraw_lp_res_usad_fin(
+        return (compliance, token_out, withdraw_lp_res_usdcx_fin(
             transfer_future, claim_key, lp_token.market_id,
             lp_token.lp_shares, min_tokens_out
         ));
     }
 
-    async function withdraw_lp_res_usad_fin(
+    async function withdraw_lp_res_usdcx_fin(
         transfer_future: Future,
         claim_key: field,
         market_id: field,
@@ -1529,7 +1527,7 @@ program veiled_markets_usad_v11.aleo {
 
         let market: Market = markets.get(market_id);
         assert(market.status == MARKET_STATUS_RESOLVED);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
 
         let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
@@ -1546,9 +1544,9 @@ program veiled_markets_usad_v11.aleo {
 
         market_credits.set(market_id, market_held - tokens_out);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(current_held >= tokens_out);
-        program_credits.set(CREDIT_KEY_USAD, current_held - tokens_out);
+        program_credits.set(CREDIT_KEY_USDCX, current_held - tokens_out);
 
         amm_pools.set(market_id, AMMPool {
             market_id: market_id,
@@ -1563,25 +1561,25 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // 15. WITHDRAW CREATOR FEES (USAD) — private outflow
+    // 17. WITHDRAW CREATOR FEES (USDCX) — private outflow
     // ========================================================================
 
-    async transition withdraw_fees_usad(
+    async transition withdraw_fees_usdcx(
         public market_id: field,
         private expected_amount: u128,
-    ) -> (test_usad_stablecoin.aleo/ComplianceRecord, test_usad_stablecoin.aleo/Token, Future) {
+    ) -> (test_usdcx_stablecoin.aleo/ComplianceRecord, test_usdcx_stablecoin.aleo/Token, Future) {
         let (compliance, token_out, transfer_future): (
-            test_usad_stablecoin.aleo/ComplianceRecord,
-            test_usad_stablecoin.aleo/Token,
+            test_usdcx_stablecoin.aleo/ComplianceRecord,
+            test_usdcx_stablecoin.aleo/Token,
             Future
-        ) = test_usad_stablecoin.aleo/transfer_public_to_private(self.caller, expected_amount);
+        ) = test_usdcx_stablecoin.aleo/transfer_public_to_private(self.caller, expected_amount);
 
-        return (compliance, token_out, withdraw_fees_usad_fin(
+        return (compliance, token_out, withdraw_fees_usdcx_fin(
             transfer_future, market_id, self.caller, expected_amount
         ));
     }
 
-    async function withdraw_fees_usad_fin(
+    async function withdraw_fees_usdcx_fin(
         transfer_future: Future,
         market_id: field,
         caller: address,
@@ -1592,7 +1590,7 @@ program veiled_markets_usad_v11.aleo {
         let market: Market = markets.get(market_id);
         assert(market.creator == caller);
         assert(market.status == MARKET_STATUS_RESOLVED);
-        assert(market.token_type == TOKEN_USAD);
+        assert(market.token_type == TOKEN_USDCX);
 
         let resolution: VoteTally = vote_tallies.get(market_id);
         assert(resolution.finalized);
@@ -1608,9 +1606,9 @@ program veiled_markets_usad_v11.aleo {
         assert(market_held >= expected_amount);
         market_credits.set(market_id, market_held - expected_amount);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(current_held >= expected_amount);
-        program_credits.set(CREDIT_KEY_USAD, current_held - expected_amount);
+        program_credits.set(CREDIT_KEY_USDCX, current_held - expected_amount);
     }
 
     // ########################################################################
@@ -1618,7 +1616,7 @@ program veiled_markets_usad_v11.aleo {
     // ########################################################################
 
     // ========================================================================
-    // 16. INIT MULTISIG (deployer only, one-time)
+    // 18. INIT MULTISIG (deployer only, one-time)
     // ========================================================================
 
     async transition init_multisig(
@@ -1652,7 +1650,7 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // 17. PROPOSE TREASURY WITHDRAWAL
+    // 19. PROPOSE TREASURY WITHDRAWAL
     // ========================================================================
 
     async transition propose_treasury_withdrawal(
@@ -1691,7 +1689,7 @@ program veiled_markets_usad_v11.aleo {
         let proposal_exists: bool = multisig_proposals.contains(proposal_id);
         assert(!proposal_exists);
 
-        let treasury_key: u8 = token_type == TOKEN_USAD ? CREDIT_KEY_USAD : CREDIT_KEY_ALEO;
+        let treasury_key: u8 = token_type == TOKEN_USDCX ? CREDIT_KEY_USDCX : CREDIT_KEY_ALEO;
         let treasury_balance: u128 = protocol_treasury.get_or_use(treasury_key, 0u128);
         assert(treasury_balance >= amount);
 
@@ -1713,7 +1711,7 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // 18. APPROVE PROPOSAL
+    // 20. APPROVE PROPOSAL
     // ========================================================================
 
     async transition approve_proposal(
@@ -1746,24 +1744,24 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // 19. EXECUTE PROPOSAL (USAD treasury withdrawal)
+    // 20b. EXECUTE PROPOSAL (USDCX treasury withdrawal)
     // ========================================================================
 
-    async transition exec_proposal_usad(
+    async transition exec_proposal_usdcx(
         public proposal_id: field,
         public amount: u128,
         public recipient: address,
     ) -> Future {
-        let transfer_future: Future = test_usad_stablecoin.aleo/transfer_public(
+        let transfer_future: Future = test_usdcx_stablecoin.aleo/transfer_public(
             recipient, amount
         );
 
-        return exec_proposal_usad_fin(
+        return exec_proposal_usdcx_fin(
             transfer_future, proposal_id, amount, recipient
         );
     }
 
-    async function exec_proposal_usad_fin(
+    async function exec_proposal_usdcx_fin(
         transfer_future: Future,
         proposal_id: field,
         amount: u128,
@@ -1774,7 +1772,7 @@ program veiled_markets_usad_v11.aleo {
         let config: SignerConfig = multisig_config.get(MULTISIG_CONFIG_KEY);
         let proposal: MultiSigProposal = multisig_proposals.get(proposal_id);
 
-        assert(proposal.token_type == TOKEN_USAD);
+        assert(proposal.token_type == TOKEN_USDCX);
         assert(proposal.amount == amount);
         assert(proposal.recipient == recipient);
 
@@ -1790,13 +1788,13 @@ program veiled_markets_usad_v11.aleo {
         assert(total_approvals >= config.threshold);
 
         // Deduct from treasury
-        let treasury_balance: u128 = protocol_treasury.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let treasury_balance: u128 = protocol_treasury.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(treasury_balance >= amount);
-        protocol_treasury.set(CREDIT_KEY_USAD, treasury_balance - amount);
+        protocol_treasury.set(CREDIT_KEY_USDCX, treasury_balance - amount);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USAD, 0u128);
+        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_USDCX, 0u128);
         assert(current_held >= amount);
-        program_credits.set(CREDIT_KEY_USAD, current_held - amount);
+        program_credits.set(CREDIT_KEY_USDCX, current_held - amount);
 
         // Cleanup
         multisig_proposals.remove(proposal_id);
@@ -1806,9 +1804,9 @@ program veiled_markets_usad_v11.aleo {
     }
 
     // ========================================================================
-    // 27. CLAIM VOTER REWARD — Claim accumulated protocol fee rewards (ALEO)
+    // 21. CLAIM VOTER REWARD — Claim accumulated protocol fee rewards
     // ========================================================================
-    // Voters who successfully finalize markets accumulate rewards from
+    // Voters who successfully help finalize markets accumulate rewards from
     // protocol fees (20%). This transition claims those rewards as private ALEO.
 
     async transition claim_voter_reward(
@@ -1834,8 +1832,9 @@ program veiled_markets_usad_v11.aleo {
 
         voter_rewards.set(voter, 0u128);
 
-        let current_held: u128 = program_credits.get_or_use(CREDIT_KEY_ALEO, 0u128);
+        let current_held: u128 = program_credits.get_or_use(0u8, 0u128);
         assert(current_held >= reward);
-        program_credits.set(CREDIT_KEY_ALEO, current_held - reward);
+        program_credits.set(0u8, current_held - reward);
     }
+
 }

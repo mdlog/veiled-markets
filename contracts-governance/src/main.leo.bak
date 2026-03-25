@@ -270,8 +270,8 @@ program veiled_governance_v4.aleo {
     // Key is field (hashed from address) because proposal.payload_2 is field type
     // NOTE: These mappings are written by execute_governance and read by off-chain
     // systems (frontend/backend via RPC mapping queries). Cross-program mapping reads
-    // are not supported in Leo. Market contracts use Open Voting + Bond system
-    // where anyone can submit outcomes — governance tracks resolver eligibility separately.
+    // are not supported in Leo — the deployer/bot relays decisions to market contracts
+    // via their set_resolver_status transitions.
     mapping governance_approved_resolvers: field => bool;
     mapping governance_params: field => u128;
     mapping governance_paused: u8 => bool;
@@ -581,7 +581,7 @@ program veiled_governance_v4.aleo {
         if (proposal.proposal_type == PROPOSAL_RESOLVER_ELECTION) {
             let approved: bool = proposal.payload_1 > 0u128;
             // Store in governance's own approved registry
-            // Governance tracks resolver eligibility; market contracts use Open Voting + Bond
+            // Deployer/bot then relays to market contracts via set_resolver_status
             governance_approved_resolvers.set(proposal.payload_2, approved);
         }
 
@@ -656,7 +656,7 @@ program veiled_governance_v4.aleo {
         public delegate_to: address,
         private amount: u64,
     ) -> (credits.aleo/credits, Future) {
-        // assert(false); // REMOVED: causes snarkVM circuit panic
+        assert(false);
         assert(amount >= MIN_VOTE_AMOUNT);
 
         let (change, transfer_future): (credits.aleo/credits, Future) =
